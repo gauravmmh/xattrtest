@@ -18,22 +18,23 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 
-static const char shortopts[] = "hvycdn:f:x:s:p:t:e:r";
+static const char shortopts[] = "hvycdn:f:x:s:p:t:e:ru";
 static const struct option longopts[] = {
-	{ "help",	no_argument,		0,	'h' },
+	{ "help",	    no_argument,		0,	'h' },
 	{ "verbose",	no_argument,		0,	'v' },
-	{ "verify",	no_argument,		0,	'y' },
-	{ "nth",	required_argument,	0,	'n' },
-	{ "files",	required_argument,	0,	'f' },
-	{ "xattrs",	required_argument,	0,	'x' },
-	{ "size",	required_argument,	0,	's' },
-	{ "path",	required_argument,	0,	'p' },
+	{ "verify",	    no_argument,		0,	'y' },
+	{ "nth",	    required_argument,	0,	'n' },
+	{ "files",	    required_argument,	0,	'f' },
+	{ "xattrs",	    required_argument,	0,	'x' },
+	{ "size",	    required_argument,	0,	's' },
+	{ "path",	    required_argument,	0,	'p' },
 	{ "synccaches", no_argument,		0,	'c' },
 	{ "dropcaches",	no_argument,		0,	'd' },
-	{ "script",	required_argument,	0,	't' },
-	{ "seed",	required_argument,	0,	'e' },
-	{ "random",	no_argument,		0,	'r' },
-	{ 0,		0,			0,	0   }
+	{ "script",	    required_argument,	0,	't' },
+	{ "seed",	    required_argument,	0,	'e' },
+	{ "random",	    no_argument,		0,	'r' },
+	{ "no-unlink",	no_argument,		0,	'u' },
+	{ 0,		    0,			        0,	0   }
 };
 
 static int verbose = 0;
@@ -47,6 +48,7 @@ static int size  = 1;
 static int size_is_random = 0;
 static char path[PATH_MAX] = "/tmp/xattrtest";
 static char script[PATH_MAX] = "/bin/true";
+static int no_unlink = 0;
 
 static int
 usage(int argc, char **argv) {
@@ -66,8 +68,8 @@ usage(int argc, char **argv) {
 	"  --dropcaches  -d           Drop caches between phases\n"
 	"  --script      -t <script>  Exec script between phases\n"
 	"  --seed        -e <seed>    Random seed value\n"
-	"  --random      -r           Randomly sized xattrs [16-size]\n\n");
-
+	"  --random      -r           Randomly sized xattrs [16-size]\n"
+    "  --no-unlink   -u           skip removing the test files\n\n");
 	return (0);
 }
 
@@ -80,7 +82,8 @@ parse_args(int argc, char **argv)
 	while ((c = getopt_long(argc, argv, shortopts, longopts, NULL)) != -1) {
 		switch (c) {
 		case 'h':
-			return usage(argc, argv);
+			usage(argc, argv);
+            exit(0);
 		case 'v':
 			verbose++;
 			break;
@@ -116,6 +119,9 @@ parse_args(int argc, char **argv)
 			break;
 		case 'r':
 			size_is_random = 1;
+			break;
+        case 'u':
+			no_unlink = 1;
 			break;
 		default:
 			fprintf(stderr, "Unknown option -%c\n", c);
@@ -518,6 +524,81 @@ out:
 }
 
 static int
+listxattrs(void)
+{
+	int i, rc;
+	char *file = NULL;
+	char *list = NULL;
+	struct timeval start, stop, delta;
+    int count = 0;
+    size_t offset = 0;
+    char name[XATTR_NAME_MAX];
+
+    int MAX_LIST_SIZE = 4 * 1024 * 1024;
+
+	file = malloc(PATH_MAX);
+	if (file == NULL) {
+		rc = ENOMEM;
+		fprintf(stderr, "Error %d: malloc(%d) bytes for file name\n",
+			rc, PATH_MAX);
+		goto out;
+	}
+
+    list = malloc(MAX_LIST_SIZE);
+	if (list == NULL) {
+		rc = ENOMEM;
+		fprintf(stderr, "Error %d: malloc(%d) bytes for file name\n",
+			rc, MAX_LIST_SIZE);
+		goto out;
+	}
+
+    memset(list, 0, MAX_LIST_SIZE);
+
+	(void) gettimeofday(&start, NULL);
+
+	for (i = 1; i <= files; i++) {
+		(void) sprintf(file, "%s/file-%d", path, i);
+
+		if (nth && ((i % nth) == 0))
+			fprintf(stdout, "listxattr: %s\n", file);
+
+		rc = llistxattr(file, list, MAX_LIST_SIZE);
+		if (rc == -1) {
+			fprintf(stderr, "Error %d: llistxattr(%s, list, %u)\n",
+				errno, file, MAX_LIST_SIZE);
+			rc = errno;
+			goto out;
+		}
+
+        while(offset < rc) {
+            offset += snprintf(name, sizeof(name), "%s", list + offset);
+            offset++;
+            count++;
+        }
+
+        if (count != xattrs) {
+            fprintf(stderr, "Error: verify count(%d) != xattrs(%d)\n",
+                    count, xattrs);
+			rc = errno;
+			goto out;
+        }
+
+	}
+
+	(void) gettimeofday(&stop, NULL);
+	timeval_sub(&delta, &stop, &start);
+	fprintf(stdout, "listxattr:   %d.%d seconds\n",
+	    (int)delta.tv_sec, (int)delta.tv_usec);
+
+	rc = post_hook("post");
+out:
+	if (file)
+		free(file);
+
+	return (rc);
+}
+
+static int
 unlink_files(void)
 {
 	int i, rc;
@@ -581,9 +662,16 @@ main(int argc, char **argv)
 	if (rc)
 		return (rc);
 
+    rc = listxattrs();
+	if (rc)
+		return (rc);
+
 	rc = removexattrs();
 	if (rc)
 		return (rc);
+
+	if (no_unlink)
+        return (0);
 
 	rc = unlink_files();
 	if (rc)
