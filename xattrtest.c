@@ -470,6 +470,54 @@ out:
 }
 
 static int
+removexattrs(void)
+{
+	int i, j, rc = 0;
+	char name[XATTR_NAME_MAX];
+	char *file = NULL;
+	struct timeval start, stop, delta;
+
+	file = malloc(PATH_MAX);
+	if (file == NULL) {
+		rc = ENOMEM;
+		fprintf(stderr, "Error %d: malloc(%d) bytes for file name\n",
+			rc, PATH_MAX);
+		goto out;
+	}
+
+	(void) gettimeofday(&start, NULL);
+
+	for (i = 1; i <= files; i++) {
+		(void) sprintf(file, "%s/file-%d", path, i);
+
+		if (nth && ((i % nth) == 0))
+			fprintf(stdout, "removexattr: %s\n", file);
+
+		for (j = 1; j <= xattrs; j++) {
+			(void) sprintf(name, "user.%d", j);
+
+			rc = lremovexattr(file, name);
+			if (rc == -1) {
+				fprintf(stderr, "Error %d: lremovexattr(%s, %s)\n", errno, file, name);
+				goto out;
+			}
+		}
+	}
+
+	(void) gettimeofday(&stop, NULL);
+	timeval_sub(&delta, &stop, &start);
+	fprintf(stdout, "removexattr: %d.%d seconds\n",
+	    (int)delta.tv_sec, (int)delta.tv_usec);
+
+	rc = post_hook("post");
+out:
+	if (file)
+		free(file);
+
+	return (rc);
+}
+
+static int
 unlink_files(void)
 {
 	int i, rc;
@@ -530,6 +578,10 @@ main(int argc, char **argv)
 		return (rc);
 
 	rc = getxattrs();
+	if (rc)
+		return (rc);
+
+	rc = removexattrs();
 	if (rc)
 		return (rc);
 
