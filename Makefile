@@ -3,3 +3,6 @@ xattrtest:
 
 checkstyle:
 	git format-patch -k --stdout HEAD^ | ./checkpatch.pl --no-tree
+
+clean:
+	rm -f xattrtest

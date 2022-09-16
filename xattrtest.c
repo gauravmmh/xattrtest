@@ -10,9 +10,13 @@
 #include <getopt.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <linux/limits.h>
+#include <time.h>
+#include <sys/xattr.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <linux/limits.h>
+#include <sys/time.h>
 
 static const char shortopts[] = "hvycdn:f:x:s:p:t:e:r";
 static const struct option longopts[] = {
@@ -469,7 +473,6 @@ static int
 unlink_files(void)
 {
 	int i, rc;
-	char name[16];
 	char *file = NULL;
 	struct timeval start, stop, delta;
 
